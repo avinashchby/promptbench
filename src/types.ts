@@ -74,7 +74,9 @@ export type CheckType =
   | 'behavioral'
   | 'config_contains'
   | 'config_metrics'
-  | 'config_consistency';
+  | 'config_consistency'
+  | 'config_completeness'
+  | 'config_specificity';
 
 /** Expectation for a test case */
 export interface TestExpect {
@@ -85,6 +87,8 @@ export interface TestExpect {
   max_lines?: number;
   max_tokens?: number;
   no_contradictions?: boolean;
+  max_missing_sections?: number;
+  min_specificity?: number;
 }
 
 /** A single test case from .promptbench.yml */
