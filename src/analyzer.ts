@@ -1,0 +1,144 @@
+import type {
+  ParsedConfig,
+  TestSpec,
+  TestCase,
+  TestResult,
+  AuditReport,
+  DetectorResult,
+} from './types.js';
+import { detectContradictions } from './detectors/contradictions.js';
+import { detectVagueness } from './detectors/vagueness.js';
+import { detectCompleteness } from './detectors/completeness.js';
+import { detectSpecificity } from './detectors/specificity.js';
+import { computeMetrics, detectMetricIssues } from './detectors/metrics.js';
+import { computeScore } from './scorer.js';
+
+/** Run all detectors against a parsed config and return a full audit report. */
+export function analyze(config: ParsedConfig): AuditReport {
+  const detectorResults: DetectorResult[] = [
+    ...detectContradictions(config),
+    ...detectVagueness(config),
+    ...detectCompleteness(config),
+    ...detectSpecificity(config),
+  ];
+
+  const metrics = computeMetrics(config);
+  const metricIssues = detectMetricIssues(config);
+  detectorResults.push(...metricIssues);
+
+  const score = computeScore(detectorResults, metrics);
+
+  return {
+    config: config.metadata,
+    score,
+    detectorResults,
+    metrics,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+/** Check a behavioral/no-check test case against raw config content. */
+function evaluateBehavioral(test: TestCase, raw: string): TestResult {
+  const lower = raw.toLowerCase();
+
+  if (test.expect.contains) {
+    for (const s of test.expect.contains) {
+      if (!lower.includes(s.toLowerCase())) {
+        return { name: test.name, pass: false, message: `Missing expected string: "${s}"` };
+      }
+    }
+  }
+
+  if (test.expect.not_contains) {
+    for (const s of test.expect.not_contains) {
+      if (lower.includes(s.toLowerCase())) {
+        return { name: test.name, pass: false, message: `Found forbidden string: "${s}"` };
+      }
+    }
+  }
+
+  if (test.expect.pattern) {
+    const re = new RegExp(test.expect.pattern);
+    if (!re.test(raw)) {
+      return { name: test.name, pass: false, message: `Pattern not matched: ${test.expect.pattern}` };
+    }
+  }
+
+  return { name: test.name, pass: true, message: 'All behavioral checks passed' };
+}
+
+/** Check config_contains: each string in config_has must appear in raw. */
+function evaluateConfigContains(test: TestCase, raw: string): TestResult {
+  const items = test.expect.config_has ?? [];
+  const lower = raw.toLowerCase();
+
+  for (const s of items) {
+    if (!lower.includes(s.toLowerCase())) {
+      return { name: test.name, pass: false, message: `Config missing required content: "${s}"` };
+    }
+  }
+
+  return { name: test.name, pass: true, message: 'All config_has items found' };
+}
+
+/** Check config_metrics: validate line/token counts against thresholds. */
+function evaluateConfigMetrics(test: TestCase, config: ParsedConfig): TestResult {
+  const { max_lines, max_tokens } = test.expect;
+  const { lineCount, tokenEstimate } = config.metadata;
+
+  if (max_lines !== undefined && lineCount > max_lines) {
+    return {
+      name: test.name,
+      pass: false,
+      message: `Line count ${lineCount} exceeds max ${max_lines}`,
+    };
+  }
+
+  if (max_tokens !== undefined && tokenEstimate > max_tokens) {
+    return {
+      name: test.name,
+      pass: false,
+      message: `Token estimate ${tokenEstimate} exceeds max ${max_tokens}`,
+    };
+  }
+
+  return { name: test.name, pass: true, message: 'Metrics within thresholds' };
+}
+
+/** Check config_consistency: run contradiction detector and check for errors. */
+function evaluateConfigConsistency(test: TestCase, config: ParsedConfig): TestResult {
+  if (!test.expect.no_contradictions) {
+    return { name: test.name, pass: true, message: 'No consistency check requested' };
+  }
+
+  const contradictions = detectContradictions(config);
+  const errors = contradictions.filter(r => r.severity === 'error');
+
+  if (errors.length > 0) {
+    return {
+      name: test.name,
+      pass: false,
+      message: `Found ${errors.length} contradiction error(s)`,
+      details: errors.map(e => e.message).join('; '),
+    };
+  }
+
+  return { name: test.name, pass: true, message: 'No contradictions detected' };
+}
+
+/** Run test cases from a test spec against a parsed config. */
+export function runTests(config: ParsedConfig, spec: TestSpec): TestResult[] {
+  return spec.tests.map((test) => {
+    switch (test.check) {
+      case 'config_contains':
+        return evaluateConfigContains(test, config.raw);
+      case 'config_metrics':
+        return evaluateConfigMetrics(test, config);
+      case 'config_consistency':
+        return evaluateConfigConsistency(test, config);
+      case 'behavioral':
+      default:
+        return evaluateBehavioral(test, config.raw);
+    }
+  });
+}
