@@ -1,5 +1,5 @@
 {
-  "name": "promptbench",
+  "name": "@avinashchby/promptbench",
   "version": "0.1.0",
   "description": "The testing framework for AI coding assistant configuration files",
   "type": "module",
