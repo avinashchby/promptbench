@@ -1,0 +1,35 @@
+config: ./test/fixtures/sample-claude.md
+
+tests:
+  - name: "Has project overview"
+    check: "config_contains"
+    expect:
+      config_has: ["# Project Overview", "## Tech Stack"]
+
+  - name: "Has build commands"
+    check: "config_contains"
+    expect:
+      config_has: ["pnpm install", "pnpm run build"]
+
+  - name: "Config is reasonable size"
+    check: "config_metrics"
+    expect:
+      max_lines: 500
+      max_tokens: 8000
+
+  - name: "No contradictions"
+    check: "config_consistency"
+    expect:
+      no_contradictions: true
+
+  - name: "Uses pnpm not npm"
+    scenario: "Install packages"
+    expect:
+      contains: ["pnpm"]
+      not_contains: ["npm install", "yarn add"]
+
+  - name: "Uses conventional commits"
+    scenario: "Commit changes"
+    expect:
+      contains: ["feat:", "fix:"]
+      pattern: "conventional commits"
