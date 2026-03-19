@@ -83,4 +83,74 @@ describe('runTests', () => {
     expect(results[0].pass).toBe(false);
     expect(results[0].message).toContain('exceeds max');
   });
+
+  it('passes config_completeness for a comprehensive config', async () => {
+    const config = await parseConfig(fixturePath('sample-claude.md'));
+    const spec = {
+      configPath: fixturePath('sample-claude.md'),
+      tests: [
+        {
+          name: 'Config is mostly complete',
+          check: 'config_completeness' as const,
+          expect: { max_missing_sections: 2 },
+        },
+      ],
+    };
+
+    const results = runTests(config, spec);
+    expect(results[0].pass).toBe(true);
+  });
+
+  it('fails config_completeness for an incomplete config', async () => {
+    const config = await parseConfig(fixturePath('bad-claude.md'));
+    const spec = {
+      configPath: fixturePath('bad-claude.md'),
+      tests: [
+        {
+          name: 'Config must be complete',
+          check: 'config_completeness' as const,
+          expect: { max_missing_sections: 0 },
+        },
+      ],
+    };
+
+    const results = runTests(config, spec);
+    expect(results[0].pass).toBe(false);
+    expect(results[0].message).toContain('Missing');
+  });
+
+  it('passes config_specificity for a specific config', async () => {
+    const config = await parseConfig(fixturePath('sample-claude.md'));
+    const spec = {
+      configPath: fixturePath('sample-claude.md'),
+      tests: [
+        {
+          name: 'Config is specific enough',
+          check: 'config_specificity' as const,
+          expect: { min_specificity: 1.0 },
+        },
+      ],
+    };
+
+    const results = runTests(config, spec);
+    expect(results[0].pass).toBe(true);
+  });
+
+  it('fails config_specificity for a vague config', async () => {
+    const config = await parseConfig(fixturePath('bad-claude.md'));
+    const spec = {
+      configPath: fixturePath('bad-claude.md'),
+      tests: [
+        {
+          name: 'Config must be very specific',
+          check: 'config_specificity' as const,
+          expect: { min_specificity: 2.5 },
+        },
+      ],
+    };
+
+    const results = runTests(config, spec);
+    expect(results[0].pass).toBe(false);
+    expect(results[0].message).toContain('specificity');
+  });
 });

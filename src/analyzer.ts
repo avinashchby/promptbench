@@ -126,6 +126,60 @@ function evaluateConfigConsistency(test: TestCase, config: ParsedConfig): TestRe
   return { name: test.name, pass: true, message: 'No contradictions detected' };
 }
 
+/** Check config_completeness: run completeness detector and validate missing section count. */
+function evaluateConfigCompleteness(test: TestCase, config: ParsedConfig): TestResult {
+  const findings = detectCompleteness(config);
+  const missingCount = findings.length;
+  const maxMissing = test.expect.max_missing_sections ?? 0;
+
+  if (missingCount > maxMissing) {
+    return {
+      name: test.name,
+      pass: false,
+      message: `Missing ${missingCount} section(s), max allowed: ${maxMissing}`,
+      details: findings.map(f => f.message).join('; '),
+    };
+  }
+
+  return { name: test.name, pass: true, message: `Completeness OK (${missingCount} missing, max ${maxMissing})` };
+}
+
+/** Check config_specificity: run specificity detector and validate average score. */
+function evaluateConfigSpecificity(test: TestCase, config: ParsedConfig): TestResult {
+  const findings = detectSpecificity(config);
+  const minScore = test.expect.min_specificity ?? 1.5;
+
+  let totalScore = 0;
+  for (const rule of config.rules) {
+    const lower = rule.text.toLowerCase();
+    const hasTool = ['react', 'vue', 'typescript', 'eslint', 'prettier', 'jest', 'vitest',
+      'pnpm', 'npm', 'yarn', 'docker', 'postgres', 'redis', 'tailwind', 'vite',
+      'node', 'python', 'rust', 'go', 'zod', 'graphql', 'aws'].some(t => lower.includes(t));
+    const hasBacktick = /`.+`/.test(rule.text);
+    const hasNumber = /\d+/.test(rule.text);
+    const hasExtension = /\.\w{2,4}\b/.test(rule.text);
+    const hasVerb = /\b(use|add|create|write|run|install|avoid|prefer|require|ensure|always|never)\b/i.test(rule.text);
+
+    const hasSpecific = hasTool || hasBacktick || hasExtension;
+    if (hasNumber && hasSpecific) totalScore += 3;
+    else if (hasSpecific || hasNumber) totalScore += 2;
+    else if (hasVerb) totalScore += 1;
+  }
+
+  const avg = config.rules.length > 0 ? totalScore / config.rules.length : 0;
+
+  if (avg < minScore) {
+    return {
+      name: test.name,
+      pass: false,
+      message: `Average specificity ${avg.toFixed(1)}/3, minimum required: ${minScore}`,
+      details: findings.filter(f => f.severity === 'warning').map(f => f.message).join('; '),
+    };
+  }
+
+  return { name: test.name, pass: true, message: `Specificity OK (avg ${avg.toFixed(1)}/3)` };
+}
+
 /** Run test cases from a test spec against a parsed config. */
 export function runTests(config: ParsedConfig, spec: TestSpec): TestResult[] {
   return spec.tests.map((test) => {
@@ -136,6 +190,10 @@ export function runTests(config: ParsedConfig, spec: TestSpec): TestResult[] {
         return evaluateConfigMetrics(test, config);
       case 'config_consistency':
         return evaluateConfigConsistency(test, config);
+      case 'config_completeness':
+        return evaluateConfigCompleteness(test, config);
+      case 'config_specificity':
+        return evaluateConfigSpecificity(test, config);
       case 'behavioral':
       default:
         return evaluateBehavioral(test, config.raw);
